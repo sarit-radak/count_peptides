@@ -5,10 +5,11 @@
 2. Download [cyberduck](https://cyberduck.io/download/)
 3. Connect to Joemetheus
     1. Requires VPN off-campus
-    
-    ![Password: newcomputer1](Read%20Me/Screenshot_2025-11-04_at_6.54.02_PM.png)
-    
-    Password: newcomputer1
+    2. SFTP
+    3. Server: 172.29.230.63
+    4. Port: 22
+    5. Username: cliff
+    6. Password: newcomputer1
     
 4. Bookmark project directory + data directory
     1. data directory: `/var/lib/minknow/data`
