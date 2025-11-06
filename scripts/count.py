@@ -88,7 +88,6 @@ def load_peptides(peptides_path: str) -> Tuple[List[str], List[str], Dict[str, L
     """
     Return (peptide_names, peptide_seqs, seq_to_indices).
     seq_to_indices maps exact peptide sequence -> list of indices (handles duplicate sequences).
-    No progress bar here per your earlier request.
     """
     names = []
     seqs = []
@@ -110,7 +109,6 @@ def build_kmer_index(seqs: List[str], k: int) -> Dict[str, List[int]]:
     idx = defaultdict(list)
     for i, s in enumerate(seqs):
         if len(s) < k:
-            # treat the whole seq as a key if shorter than k
             idx[s].append(i)
             continue
         seen = set()
@@ -156,7 +154,6 @@ def exact_pass_and_write_unmatched(reads_path: str, seq_to_indices: Dict[str, Li
             else:
                 # write unmatched to temp fasta
                 unmatched_fh.write(f">{hdr}\n")
-                # wrap seq lines at 80 chars
                 for i in range(0, len(seq), 80):
                     unmatched_fh.write(seq[i : i + 80] + "\n")
         it.close()
@@ -169,47 +166,6 @@ def exact_pass_and_write_unmatched(reads_path: str, seq_to_indices: Dict[str, Li
 def adaptive_max_edits(length: int) -> int:
     """Adaptive threshold: 10% of length rounded down, min 1, cap 3."""
     return min(3, max(1, int(length * 0.1)))
-
-
-def candidates_from_kmers(seq: str, k: int, kmer_index: Dict[str, List[int]], length_to_ids: Dict[int, List[int]], max_edit: int, allow_len_slop: int = 1) -> List[Tuple[int, int]]:
-    """
-    Given a read seq, return candidate peptide indices with a score (shared-kmer-count).
-    We also use a loose length filter: peptides with length within [len-max_edit-allow_len_slop, len+max_edit+allow_len_slop]
-    Returns list of tuples (peptide_idx, score) sorted descending by score.
-    """
-    L = len(seq)
-    min_len = max(1, L - max_edit - allow_len_slop)
-    max_len = L + max_edit + allow_len_slop
-
-    # collect candidate ids via k-mer hits
-    counter = Counter()
-    if len(seq) < k:
-        # if read shorter than k, match exact kmer as the whole seq
-        ids = kmer_index.get(seq, [])
-        for pid in ids:
-            counter[pid] += 1
-    else:
-        seen_kmers = set()
-        for i in range(len(seq) - k + 1):
-            kmer = seq[i : i + k]
-            if kmer in seen_kmers:
-                continue
-            seen_kmers.add(kmer)
-            ids = kmer_index.get(kmer)
-            if ids:
-                for pid in ids:
-                    counter[pid] += 1
-
-    # filter by length buckets
-    results = []
-    for pid, score in counter.items():
-        # we can't access peptide lengths here; length_to_ids is len->list(ids).
-        # To filter efficiently, we check whether pid is in an allowed length bucket using a small map:
-        # We'll rely on a global pid_to_len map provided externally (see caller).
-        results.append((pid, score))
-    # sort by score descending
-    results.sort(key=lambda x: -x[1])
-    return results
 
 
 def _fuzzy_worker(batch_reads: List[Tuple[str, str]], seqs: List[str], kmer_index: Dict[str, List[int]],
@@ -245,14 +201,12 @@ def _fuzzy_worker(batch_reads: List[Tuple[str, str]], seqs: List[str], kmer_inde
                     for pid in ids:
                         counter[pid] += 1
 
-        # Apply minimum shared-kmer filter to reduce candidates aggressively
         if not counter:
             continue
         filtered = [(pid, score) for pid, score in counter.items() if score >= min_shared_kmers]
         if not filtered:
             continue
 
-        # Filter by length tolerance (tighter filter)
         candidates = []
         for pid, score in filtered:
             plen = pid_to_len[pid]
@@ -262,11 +216,9 @@ def _fuzzy_worker(batch_reads: List[Tuple[str, str]], seqs: List[str], kmer_inde
         if not candidates:
             continue
 
-        # pick top_n candidates by score (keep score attached)
         candidates.sort(key=lambda x: -x[1])
-        candidates = candidates[:top_n]  # list of (pid, score)
+        candidates = candidates[:top_n]
 
-        # edlib alignment over candidates, keep best (lowest edit distance)
         best_pid = None
         best_dist = None
         best_score = None
@@ -287,10 +239,45 @@ def _fuzzy_worker(batch_reads: List[Tuple[str, str]], seqs: List[str], kmer_inde
                     break
 
         if best_pid is not None:
-            # return header and sequence so the caller can write troubleshooting rows
             matched_records.append((hdr, seq_u, best_pid, best_dist if best_dist is not None else -1, best_score if best_score is not None else 0))
 
     return matched_records
+
+
+# -----------------------
+# Translation helper
+# -----------------------
+CODON_TABLE = {
+    'TTT':'F','TTC':'F','TTA':'L','TTG':'L',
+    'TCT':'S','TCC':'S','TCA':'S','TCG':'S',
+    'TAT':'Y','TAC':'Y','TAA':'*','TAG':'*',
+    'TGT':'C','TGC':'C','TGA':'*','TGG':'W',
+    'CTT':'L','CTC':'L','CTA':'L','CTG':'L',
+    'CCT':'P','CCC':'P','CCA':'P','CCG':'P',
+    'CAT':'H','CAC':'H','CAA':'Q','CAG':'Q',
+    'CGT':'R','CGC':'R','CGA':'R','CGG':'R',
+    'ATT':'I','ATC':'I','ATA':'I','ATG':'M',
+    'ACT':'T','ACC':'T','ACA':'T','ACG':'T',
+    'AAT':'N','AAC':'N','AAA':'K','AAG':'K',
+    'AGT':'S','AGC':'S','AGA':'R','AGG':'R',
+    'GTT':'V','GTC':'V','GTA':'V','GTG':'V',
+    'GCT':'A','GCC':'A','GCA':'A','GCG':'A',
+    'GAT':'D','GAC':'D','GAA':'E','GAG':'E',
+    'GGT':'G','GGC':'G','GGA':'G','GGG':'G',
+}
+
+def translate_dna(seq: str) -> str:
+    """Translate DNA (T) to amino acids. Unknown codons -> X. Ignores trailing bases if not divisible by 3."""
+    if not seq:
+        return ""
+    s = seq.upper().replace('U', 'T')
+    aa = []
+    L = (len(s) // 3) * 3
+    for i in range(0, L, 3):
+        codon = s[i:i+3]
+        aa.append(CODON_TABLE.get(codon, 'X'))
+    return "".join(aa)
+
 
 # -----------------------
 # Main routine
@@ -314,31 +301,26 @@ def main():
         print("ERROR: --tolerate-errors requires edlib. Install with `pip install edlib`", file=sys.stderr)
         sys.exit(1)
 
-    # load peptides (no loading progress bar)
+    # load peptides
     peptide_names, peptide_seqs, seq_to_indices = load_peptides(args.peptides)
-    n_peptides = len(peptide_names)
+    name_to_seq = {n: s for n, s in zip(peptide_names, peptide_seqs)}
+
+    n_peptides_entries = len(peptide_names)
     pid_to_len = [len(s) for s in peptide_seqs]
 
-    # counts initialized to zero
-    counts = [0] * n_peptides
+    counts = [0] * n_peptides_entries
 
-    # temp file for unmatched reads
     tmp = tempfile.NamedTemporaryFile(delete=False, mode="w", suffix=".fasta")
     tmp_name = tmp.name
     tmp.close()
 
-    # exact pass: write unmatched to tmp file and update counts
     total_reads, matched_reads = exact_pass_and_write_unmatched(args.reads, seq_to_indices, counts, tmp_name)
 
-    # If fuzzy fallback is not enabled, we're done
     fuzzy_matches = 0
     if args.tolerate_errors:
-        # Build k-mer index of peptides
         k = args.kmer
         kmer_index = build_kmer_index(peptide_seqs, k)
 
-        # Process unmatched reads in batches, optionally with multiprocessing
-        # We'll read tmp_name and create batches of (hdr, seq)
         def batch_iterator_reads(path, batch_size):
             it = read_fasta_stream(path)
             batch = []
@@ -350,47 +332,35 @@ def main():
             if batch:
                 yield batch
 
-        # estimate number of unmatched reads for progress bar
         try:
             estimated_unmatched = count_headers(tmp_name)
         except Exception:
             estimated_unmatched = None
 
-        # If threads > 1, use ProcessPoolExecutor
         from concurrent.futures import ProcessPoolExecutor, as_completed
 
         top_n = args.top_candidates
         batch_size = args.batch_size
         threads = max(1, args.threads)
 
-        # We'll accumulate matched peptide indices returned by workers and update counts afterwards
-        #matched_pid_list = []
-        matched_records = []  # list of tuples (hdr, read_seq, best_pid, best_dist, best_score)
+        matched_records = []
 
         if threads > 1:
             with ProcessPoolExecutor(max_workers=threads) as exe:
                 futures = []
                 for batch in batch_iterator_reads(tmp_name, batch_size):
-                    # submit batch to worker
                     fut = exe.submit(_fuzzy_worker, batch, peptide_seqs, kmer_index, pid_to_len, top_n, k)
                     futures.append(fut)
-                # progress bar while futures complete
                 if estimated_unmatched:
                     pbar = tqdm(total=estimated_unmatched, unit="reads", desc="Fuzzy pass")
                 else:
                     pbar = tqdm(unit="reads", desc="Fuzzy pass")
                 for fut in as_completed(futures):
-                        recs = fut.result()  # list of (hdr, seq, pid, dist, score)
-                        matched_records.extend(recs)
-                        # For progress bar: we don't know how many reads were processed in this future,
-                        # so update conservatively by number of records returned (this keeps the bar moving).
-                        pbar.update(len(recs)) # advance by number of processed reads isn't directly known, keep bar moving per batch size:
-                    # we don't know the exact number of processed reads here; approximate by batch_size steps:
-                    # but safer: pbar.update(batch_size) might overshoot at end; instead compute processed by summing counts:
-                    # To keep it simple and avoid incorrect ETA, we'll increment by len(matched_pids) as a conservative progress update.
+                    recs = fut.result()
+                    matched_records.extend(recs)
+                    pbar.update(len(recs))
                 pbar.close()
         else:
-            # single-threaded: simply iterate batches and call worker directly
             if estimated_unmatched:
                 pbar = tqdm(total=estimated_unmatched, unit="reads", desc="Fuzzy pass")
             else:
@@ -401,8 +371,6 @@ def main():
                 pbar.update(len(batch))
             pbar.close()
 
-        # Update counts from matched_pid_list
-# Update counts from matched_records
         for (_hdr, _seq, pid, _dist, _score) in matched_records:
             counts[pid] += 1
 
@@ -421,43 +389,91 @@ def main():
 
     if args.unmatched_out:
         try:
-            # Ensure destination directory exists
             outdir = os.path.dirname(os.path.abspath(args.unmatched_out))
             if outdir and not os.path.exists(outdir):
                 os.makedirs(outdir, exist_ok=True)
-            # atomically move/replace
             os.replace(tmp_name, args.unmatched_out)
             print(f"Unmatched reads (from exact pass) written to: {args.unmatched_out}")
-            # Set tmp_name to None so we don't attempt to delete it below
             tmp_name = None
-
         except Exception as e:
             print(f"Warning: failed to write unmatched reads to {args.unmatched_out}: {e}", file=sys.stderr)
 
-    # Cleanup temp file
     try:
-        os.unlink(tmp_name)
+        if tmp_name:
+            os.unlink(tmp_name)
     except Exception:
         pass
 
-    # Write transposed CSV: peptide, count
+    # -----------------------
+    # Build grouped representation (base -> suffix -> count & seq)
+    # -----------------------
+    groups: Dict[str, Dict[int, int]] = {}
+    groups_seq: Dict[str, Dict[int, str]] = {}
+    max_suffix = 0
+    has_unsuffixed = False
+
+    for name, c, seq in zip(peptide_names, counts, peptide_seqs):
+        parts = name.rsplit(".", 1)
+        if len(parts) == 2 and parts[1].isdigit():
+            base = parts[0]
+            suf = int(parts[1])
+        else:
+            base = name
+            suf = 0
+            has_unsuffixed = True
+        groups.setdefault(base, {})[suf] = c
+        groups_seq.setdefault(base, {})[suf] = seq
+        if suf > max_suffix:
+            max_suffix = suf
+
+    grouped_peptides_count = len(groups)
+    identified_grouped = sum(1 for g in groups.values() if any(count > 0 for count in g.values()))
+    not_identified_grouped = grouped_peptides_count - identified_grouped
+
+    # Compose header: Peptide, Translation, [Count (unsuffixed) maybe], Count .1..Count .max
+    header = ["Peptide", "Translation"]
+    if has_unsuffixed:
+        header.append("Count")
+    for i in range(1, max_suffix + 1):
+        header.append(f"Count .{i}")
+
+    # -----------------------
+    # Write CSV: one row per base with Translation column before counts
+    # -----------------------
     with open(args.out, "w", newline="") as fh:
         writer = csv.writer(fh)
-        writer.writerow(["Peptide", "Count"])
-        for name, c in zip(peptide_names, counts):
-            writer.writerow([name, c])
+        writer.writerow(header)
+        for base in sorted(groups.keys()):
+            grp = groups[base]
+            seq_map = groups_seq.get(base, {})
+            # pick representative seq for translation: prefer .1, else lowest suffix present (incl 0)
+            rep_seq = None
+            if 1 in seq_map:
+                rep_seq = seq_map[1]
+            else:
+                if seq_map:
+                    rep_seq = seq_map[sorted(seq_map.keys())[0]]
+            translation = translate_dna(rep_seq) if rep_seq else ""
+            # build row: base, translation, then counts
+            row = [base, translation]
+            if has_unsuffixed:
+                # include unsuffixed value or blank if absent
+                if 0 in grp:
+                    row.append(grp[0])
+                else:
+                    row.append("")
+            for i in range(1, max_suffix + 1):
+                row.append(grp.get(i, ""))
+            writer.writerow(row)
 
-    # Summary
+    # Summary (grouped)
     unmatched_reads = total_reads - matched_reads
-    # include fuzzy matches into matched_reads for summary if used
     total_matched_reads = matched_reads + (fuzzy_matches if args.tolerate_errors else 0)
     pct_matched = (total_matched_reads / total_reads * 100) if total_reads else 0.0
     pct_unmatched = (total_reads - total_matched_reads) / total_reads * 100 if total_reads else 0.0
 
-    identified_peptides = sum(1 for c in counts if c > 0)
-    not_identified_peptides = n_peptides - identified_peptides
-    pct_identified = (identified_peptides / n_peptides * 100) if n_peptides else 0.0
-    pct_not_identified = (not_identified_peptides / n_peptides * 100) if n_peptides else 0.0
+    pct_identified = (identified_grouped / grouped_peptides_count * 100) if grouped_peptides_count else 0.0
+    pct_not_identified = (not_identified_grouped / grouped_peptides_count * 100) if grouped_peptides_count else 0.0
 
     print("\n--- Summary ---")
     print(f"Sample: {basename_without_fasta(args.reads)}")
@@ -467,9 +483,9 @@ def main():
         print(f"Reads matched (fuzzy): {fuzzy_matches}")
     print(f"Reads matched (total): {total_matched_reads} ({pct_matched:.2f}%)")
     print(f"Reads unmatched: {total_reads - total_matched_reads} ({pct_unmatched:.2f}%)")
-    print(f"Peptide sequences: {n_peptides}")
-    print(f"Peptides identified (count > 0):   {identified_peptides} ({pct_identified:.2f}%)")
-    print(f"Peptides not identified (count=0): {not_identified_peptides} ({pct_not_identified:.2f}%)")
+    print(f"Peptide sequences: {grouped_peptides_count}")
+    print(f"Peptides identified (count > 0):   {identified_grouped} ({pct_identified:.2f}%)")
+    print(f"Peptides not identified (count=0): {not_identified_grouped} ({pct_not_identified:.2f}%)")
     print("----------------")
     print(f"Counts written to {args.out}")
 

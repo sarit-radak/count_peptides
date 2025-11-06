@@ -1,11 +1,4 @@
-/1-raw_data/HPV_L_A02_Hypermut_Naive_S8_L001.merge.fasta
-/1-raw_data/HPV_L_A02_Hypermut_S1_Neg_S10_L001.merge.fasta
-/1-raw_data/HPV_L_A02_Hypermut_S1_Pos_S9_L001.merge.fasta
-/1-raw_data/HPV_L_A02_Hypermut_S2_Neg_S12_L001.merge.fasta
-/1-raw_data/HPV_L_A02_Hypermut_S2_Pos_S11_L001.merge.fasta
-/1-raw_data/HPV_L_A02_Hypermut_S3_Neg_S14_L001.merge.fasta
-/1-raw_data/HPV_L_A02_Hypermut_S3_Pos_S13_L001.merge.fasta
 /2-trimmed/
 /3-counts/
 /logs/
-/hpv.fasta
+/misc_input_data/

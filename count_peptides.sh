@@ -16,6 +16,7 @@ for library in "${libraries[@]}"; do
     ### count peptides
     python3 -u ./scripts/count.py -r ./2-trimmed/$library.fasta -p ./reference/hpv_l.fasta -o ./3-counts/$library.csv #--tolerate-errors --threads 1 --batch-size 2000 --min-shared-kmers 5 #-t 16 
 
+
     } >"$log_file" 2>&1 &
 
 done
