@@ -437,6 +437,13 @@ def main():
     for i in range(1, max_suffix + 1):
         header.append(f"Count .{i}")
 
+    # add Sum and Frequency columns to header (do this once, before writing the file)
+    header.append("Sum")
+    header.append("Frequency")
+
+    # total of all counts (used to compute per-group frequency)
+    total_sum = sum(counts)
+
     # -----------------------
     # Write CSV: one row per base with Translation column before counts
     # -----------------------
@@ -464,6 +471,13 @@ def main():
                     row.append("")
             for i in range(1, max_suffix + 1):
                 row.append(grp.get(i, ""))
+
+            # compute numeric sum across the count columns (skip blanks), append Sum and Frequency
+            group_vals = [int(v) for v in row[2:] if v not in ("", None)]
+            group_sum = sum(group_vals)
+            row.append(group_sum)
+            freq = (group_sum / total_sum) if total_sum else 0.0
+            row.append(f"{freq:.6f}")
             writer.writerow(row)
 
     # Summary (grouped)
