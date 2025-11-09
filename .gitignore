@@ -1,6 +1,8 @@
-/1-raw_data/
+/1-input_fasta/
 /2-trimmed/
 /3-counts/
+/fastq_pass/
+/fastq_pass_ignore/
 /logs/
 /misc_input_data/
 /reference/Armstrong_CO_peptides_trimmed.fasta
