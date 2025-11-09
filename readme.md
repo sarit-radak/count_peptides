@@ -1,2 +1,1 @@
-# Read Me
 See https://www.notion.so/Counting-Peptides-2a6e5b183a4c807fb83adb4b0154be97?source=copy_link
