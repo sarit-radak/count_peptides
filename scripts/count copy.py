@@ -5,12 +5,11 @@ count.py
 Exact-first counting with optional fuzzy fallback (k-mer prefilter + edlib).
 
 Usage:
-    python3 count.py -r reads.fasta -p peptides.fasta -o counts.csv [--direct-only] [--threads N]
+    python3 count.py -r reads.fasta -p peptides.fasta -o counts.csv [--tolerate-errors] [--threads N]
 
 Notes:
- - By default (no flags) exact matching is performed first; reads that do not match exactly
-   will be sent to the fuzzy fallback (k-mer prefilter + edlib) if edlib is available.
- - Use --direct-only to disable fuzzy fallback and keep only exact matching.
+ - By default only exact matching is performed.
+ - Use --tolerate-errors to enable fuzzy-mode for reads that do not match exactly.
 """
 import argparse
 import os
@@ -27,12 +26,6 @@ try:
     import edlib
 except Exception as e:
     edlib = None
-
-# openpyxl for Excel output (optional)
-try:
-    from openpyxl import Workbook
-except Exception:
-    Workbook = None
 
 # -----------------------
 # I/O helpers
@@ -287,36 +280,6 @@ def translate_dna(seq: str) -> str:
 
 
 # -----------------------
-# Excel writer helper
-# -----------------------
-def write_summary_excel(path: str, summary_rows: List[Tuple[str, object, object]]):
-    """
-    summary_rows: list of tuples (metric_label, count_or_str, percent_or_empty)
-      - count_or_str may be int OR str (for sample name)
-      - percent_or_empty may be float or empty string
-    """
-    if Workbook is None:
-        print(f"Warning: openpyxl not installed; cannot write Excel summary to {path}", file=sys.stderr)
-        return
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "trim_summary"
-    ws.append(["metric", "count", "percent"])
-    for label, count, pct in summary_rows:
-        # format count as-is (string or numeric)
-        cnt_cell = count
-        # format percent cell if numeric, else leave blank / as provided string
-        if isinstance(pct, (int, float)):
-            pct_cell = f"{pct:.2f}%"
-        elif pct is None:
-            pct_cell = ""
-        else:
-            pct_cell = str(pct)
-        ws.append([label, cnt_cell, pct_cell])
-    wb.save(path)
-
-
-# -----------------------
 # Main routine
 # -----------------------
 def main():
@@ -324,7 +287,7 @@ def main():
     p.add_argument("--reads", "-r", required=True, help="Trimmed reads FASTA file (can be .gz)")
     p.add_argument("--peptides", "-p", required=True, help="Peptides FASTA file (can be .gz)")
     p.add_argument("--out", "-o", required=True, help="Output CSV path (peptide, count)")
-    p.add_argument("--direct-only", action="store_true", help="Only use exact matches; do not run fuzzy searches on reads that fail exact matching.")
+    p.add_argument("--tolerate-errors", action="store_true", help="Enable fuzzy fallback for unmatched reads (k-mer prefilter + edlib)")
     p.add_argument("--kmer", type=int, default=8, help="k-mer size for prefilter (default 8)")
     p.add_argument("--top-candidates", type=int, default=15, help="Number of top k-mer candidates to consider per read (default 15)")
     p.add_argument("--threads", "-t", type=int, default=1, help="Number of worker processes for fuzzy pass (default 1)")
@@ -334,9 +297,8 @@ def main():
     p.add_argument("--min-shared-kmers", type=int, default=10, help="Minimum number of shared k-mers between read and peptide for candidate to be considered (default 10)")
     args = p.parse_args()
 
-    # If fuzzy fallback is allowed (i.e., direct_only is False) we require edlib.
-    if not args.direct_only and edlib is None:
-        print("ERROR: fuzzy fallback requires edlib. Install with `pip install edlib` or run with --direct-only", file=sys.stderr)
+    if args.tolerate_errors and edlib is None:
+        print("ERROR: --tolerate-errors requires edlib. Install with `pip install edlib`", file=sys.stderr)
         sys.exit(1)
 
     # load peptides
@@ -355,8 +317,7 @@ def main():
     total_reads, matched_reads = exact_pass_and_write_unmatched(args.reads, seq_to_indices, counts, tmp_name)
 
     fuzzy_matches = 0
-    # If direct_only is False, perform fuzzy fallback on unmatched reads
-    if not args.direct_only:
+    if args.tolerate_errors:
         k = args.kmer
         kmer_index = build_kmer_index(peptide_seqs, k)
 
@@ -388,18 +349,16 @@ def main():
             with ProcessPoolExecutor(max_workers=threads) as exe:
                 futures = []
                 for batch in batch_iterator_reads(tmp_name, batch_size):
-                    # pass min_shared_kmers into worker as well
-                    fut = exe.submit(_fuzzy_worker, batch, peptide_seqs, kmer_index, pid_to_len, top_n, k, args.min_shared_kmers)
-                    futures.append((fut, len(batch)))
+                    fut = exe.submit(_fuzzy_worker, batch, peptide_seqs, kmer_index, pid_to_len, top_n, k)
+                    futures.append(fut)
                 if estimated_unmatched:
                     pbar = tqdm(total=estimated_unmatched, unit="reads", desc="Fuzzy pass")
                 else:
                     pbar = tqdm(unit="reads", desc="Fuzzy pass")
-                # update pbar by batch sizes for accurate progress
-                for fut, bsize in futures:
+                for fut in as_completed(futures):
                     recs = fut.result()
                     matched_records.extend(recs)
-                    pbar.update(bsize)
+                    pbar.update(len(recs))
                 pbar.close()
         else:
             if estimated_unmatched:
@@ -428,7 +387,6 @@ def main():
                     writer.writerow([hdr, read_seq, peptide_name, peptide_seq, dist, score])
             print(f"Fuzzy troubleshooting CSV written to: {troubleshoot_path}")
 
-    # Optionally write unmatched reads produced by the exact pass to a user-specified path
     if args.unmatched_out:
         try:
             outdir = os.path.dirname(os.path.abspath(args.unmatched_out))
@@ -524,7 +482,7 @@ def main():
 
     # Summary (grouped)
     unmatched_reads = total_reads - matched_reads
-    total_matched_reads = matched_reads + (fuzzy_matches if not args.direct_only else 0)
+    total_matched_reads = matched_reads + (fuzzy_matches if args.tolerate_errors else 0)
     pct_matched = (total_matched_reads / total_reads * 100) if total_reads else 0.0
     pct_unmatched = (total_reads - total_matched_reads) / total_reads * 100 if total_reads else 0.0
 
@@ -535,39 +493,15 @@ def main():
     print(f"Sample: {basename_without_fasta(args.reads)}")
     print(f"Total reads processed: {total_reads}")
     print(f"Reads matched (exact): {matched_reads}")
-    if not args.direct_only:
+    if args.tolerate_errors:
         print(f"Reads matched (fuzzy): {fuzzy_matches}")
     print(f"Reads matched (total): {total_matched_reads} ({pct_matched:.2f}%)")
     print(f"Reads unmatched: {total_reads - total_matched_reads} ({pct_unmatched:.2f}%)")
-    print(f"Peptide sequences in reference file: {grouped_peptides_count}")
+    print(f"Peptide sequences: {grouped_peptides_count}")
     print(f"Peptides identified (count > 0):   {identified_grouped} ({pct_identified:.2f}%)")
     print(f"Peptides not identified (count=0): {not_identified_grouped} ({pct_not_identified:.2f}%)")
     print("----------------")
     print(f"Counts written to {args.out}")
-
-    # Write Excel summary to ./3-counts/summary/(library)_trim_summary.xlsx
-    lib_name = basename_without_fasta(args.reads)
-    summary_dir = os.path.join(".", "3-counts", "summary")
-    os.makedirs(summary_dir, exist_ok=True)
-    excel_path = os.path.join(summary_dir, f"{lib_name}_trim_summary.xlsx")
-
-    summary_rows = []
-    # put the sample name in the 'count' column as a string, leave percent blank
-    summary_rows.append(("Total reads processed", total_reads, 100.0))
-    summary_rows.append(("Reads matched (exact)", matched_reads, (matched_reads / total_reads * 100) if total_reads else 0.0))
-    if not args.direct_only:
-        summary_rows.append(("Reads matched (fuzzy)", fuzzy_matches, (fuzzy_matches / total_reads * 100) if total_reads else 0.0))
-    summary_rows.append(("Reads matched (total)", total_matched_reads, pct_matched))
-    summary_rows.append(("Reads unmatched", total_reads - total_matched_reads, pct_unmatched))
-    summary_rows.append(("Peptide sequences in reference file", grouped_peptides_count, 100.0))
-    summary_rows.append(("Peptides identified (count > 0)", identified_grouped, pct_identified))
-    summary_rows.append(("Peptides not identified (count=0)", not_identified_grouped, pct_not_identified))
-
-    try:
-        write_summary_excel(excel_path, summary_rows)
-        print(f"Trim summary Excel written to: {excel_path}")
-    except Exception as e:
-        print(f"Failed to write Excel summary: {e}", file=sys.stderr)
 
 
 if __name__ == "__main__":
