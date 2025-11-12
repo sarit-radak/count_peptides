@@ -9,12 +9,12 @@ mkdir -p 3-counts
 
 
 # trim reference
-#python3 -u ./scripts/trim.py -r ./reference/Armstrong_CO_peptides.fasta -c ./reference/constant.fasta -o ./reference/Armstrong_CO_peptides_trimmed.fasta --troubleshoot
+#python3 -u ./scripts/trim.py -r ./reference/(reference).fasta -c ./reference/constant.fasta -o ./reference/(reference)_trimmed.fasta --troubleshoot
 
 
 
 # copy fastq_pass directory
-#cp -r /var/lib/minknow/data/20251106_Jonah_and_Markus_library/no_sample_id/20251106_1531_MN49129_FBC15226_34bd3843/fastq_pass/ ./fastq_pass
+#cp -r /var/lib/minknow/data/(path)/fastq_pass/ ./fastq_pass
 
 # rename data folders (barcode01->Naive)
 #python3 -u scripts/rename_folders.py
@@ -22,7 +22,7 @@ mkdir -p 3-counts
 
 
 # pull library names from fastq folders OR
-libraries=($(find ./fastq_pass -mindepth 1 -maxdepth 1 -type d -exec bash -c 'for f; do basename "${f%.fasta}"; done' _ {} +))
+#libraries=($(find ./fastq_pass -mindepth 1 -maxdepth 1 -type d -exec bash -c 'for f; do basename "${f%.fasta}"; done' _ {} +))
 
 # pull library names from fasta files
 # libraries=($(find 1-input_fasta -mindepth 1 -maxdepth 1 -type f -exec bash -c 'for f; do basename "${f%.fasta}"; done' _ {} +))
