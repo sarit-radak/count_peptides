@@ -22,10 +22,10 @@ mkdir -p 3-counts
 
 
 # pull library names from fastq folders OR
-#libraries=($(find ./fastq_pass -mindepth 1 -maxdepth 1 -type d -exec bash -c 'for f; do basename "${f%.fasta}"; done' _ {} +))
+libraries=($(find ./fastq_pass -mindepth 1 -maxdepth 1 -type d -exec bash -c 'for f; do basename "${f%.fasta}"; done' _ {} +))
 
 # pull library names from fasta files
-libraries=($(find 1-input_fasta -mindepth 1 -maxdepth 1 -type f -exec bash -c 'for f; do basename "${f%.fasta}"; done' _ {} +))
+# libraries=($(find 1-input_fasta -mindepth 1 -maxdepth 1 -type f -exec bash -c 'for f; do basename "${f%.fasta}"; done' _ {} +))
 
 for library in "${libraries[@]}"; do
     log_file="logs/${library}.log"
@@ -48,4 +48,8 @@ done
 # wait for all backgrounded jobs to finish
 wait
 
+# collect summary data for trim and count steps
+#python3 -u scripts/collect_summaries.py
+
+# collect frequencies across libraries
 #python3 -u scripts/collect_frequencies.py

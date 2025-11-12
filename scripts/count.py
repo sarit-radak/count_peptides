@@ -300,7 +300,7 @@ def write_summary_excel(path: str, summary_rows: List[Tuple[str, object, object]
         return
     wb = Workbook()
     ws = wb.active
-    ws.title = "trim_summary"
+    ws.title = "count_summary"
     ws.append(["metric", "count", "percent"])
     for label, count, pct in summary_rows:
         # format count as-is (string or numeric)
@@ -545,11 +545,11 @@ def main():
     print("----------------")
     print(f"Counts written to {args.out}")
 
-    # Write Excel summary to ./3-counts/summary/(library)_trim_summary.xlsx
+    # Write Excel summary to ./3-counts/summary/(library)_count_summary.xlsx
     lib_name = basename_without_fasta(args.reads)
     summary_dir = os.path.join(".", "3-counts", "summary")
     os.makedirs(summary_dir, exist_ok=True)
-    excel_path = os.path.join(summary_dir, f"{lib_name}_trim_summary.xlsx")
+    excel_path = os.path.join(summary_dir, f"{lib_name}_count_summary.xlsx")
 
     summary_rows = []
     # put the sample name in the 'count' column as a string, leave percent blank
