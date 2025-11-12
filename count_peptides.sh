@@ -9,7 +9,7 @@ mkdir -p 3-counts
 
 
 # trim reference
-#python3 -u ./scripts/trim.py -r ./reference/(reference).fasta -c ./reference/constant.fasta -o ./reference/(reference)_trimmed.fasta --troubleshoot
+#python3 -u ./scripts/trim.py -r ./reference/(reference).fasta -c ./reference/constant.fasta -o ./reference/(reference)_trimmed.fasta
 
 
 
