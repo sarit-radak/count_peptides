@@ -35,10 +35,10 @@ for library in "${libraries[@]}"; do
     # collect fastq files into single fasta
     #python3 -u ./scripts/collect_to_fasta.py -l $library -i ./fastq_pass/$library -o ./1-input_fasta
     
-    ### trim reads
+    # trim reads
     #python3 -u ./scripts/trim.py -r ./1-input_fasta/$library.fasta -c ./reference/constant.fasta -o ./2-trimmed/$library.fasta
 
-    ### count peptides
+    # count peptides
     #python3 -u ./scripts/count.py -r ./2-trimmed/$library.fasta -p ./reference/hpv_l.fasta -o ./3-counts/$library.csv
 
     } >"$log_file" 2>&1 &
