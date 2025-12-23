@@ -9,7 +9,10 @@ mkdir -p 3-counts
 
 
 # trim reference
-#python3 -u ./scripts/trim.py -r ./reference/(reference).fasta -c ./reference/constant.fasta -o ./reference/(reference)_trimmed.fasta
+#python3 -u ./scripts/trim.py -r ./reference/SIV_Pooled_Libraries.fasta -c ./reference/constant.fasta -o ./reference/SIV_Pooled_Libraries_trimmed.fasta
+
+# rename peptides that appear multiple times
+#python3 -u ./scripts/rename_duplicates.py -i ./reference/SIV_Pooled_Libraries.fasta -o ./reference/SIV_Pooled_Libraries_renumbered.fasta
 
 
 
@@ -25,7 +28,7 @@ mkdir -p 3-counts
 #libraries=($(find ./fastq_pass -mindepth 1 -maxdepth 1 -type d -exec bash -c 'for f; do basename "${f%.fasta}"; done' _ {} +))
 
 # pull library names from fasta files
-#libraries=($(find 1-input_fasta -mindepth 1 -maxdepth 1 -type f -exec bash -c 'for f; do basename "${f%.fasta}"; done' _ {} +))
+libraries=($(find 1-input_fasta -mindepth 1 -maxdepth 1 -type f -exec bash -c 'for f; do basename "${f%.fasta}"; done' _ {} +))
 
 for library in "${libraries[@]}"; do
     log_file="logs/${library}.log"
@@ -39,7 +42,7 @@ for library in "${libraries[@]}"; do
     #python3 -u ./scripts/trim.py -r ./1-input_fasta/$library.fasta -c ./reference/constant.fasta -o ./2-trimmed/$library.fasta
 
     # count peptides
-    #python3 -u ./scripts/count.py -r ./2-trimmed/$library.fasta -p ./reference/hpv_l.fasta -o ./3-counts/$library.csv
+    #python3 -u ./scripts/count.py -r ./2-trimmed/$library.fasta -p ./reference/test_ref_renumbered.fasta -o ./3-counts/$library.csv
 
     } >"$log_file" 2>&1 &
 
