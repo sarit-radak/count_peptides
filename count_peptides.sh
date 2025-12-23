@@ -42,7 +42,7 @@ for library in "${libraries[@]}"; do
     #python3 -u ./scripts/trim.py -r ./1-input_fasta/$library.fasta -c ./reference/constant.fasta -o ./2-trimmed/$library.fasta
 
     # count peptides
-    #python3 -u ./scripts/count.py -r ./2-trimmed/$library.fasta -p ./reference/test_ref_renumbered.fasta -o ./3-counts/$library.csv
+    #python3 -u ./scripts/count.py -r ./2-trimmed/$library.fasta -p ./reference/SIV_Pooled_Libraries_renumbered.fasta -o ./3-counts/$library.csv
 
     } >"$log_file" 2>&1 &
 
